@@ -4013,54 +4013,153 @@ function openFullscreen(imageUrl) {
 }
 
 
-// Reddy navigation and startup. Increment APP_BUILD in each new APK release.
+// Reddy navigation: a single browser Back guard, with separate app history.
 const REDDY_APP_BUILD = 1;
 let reddyRestoring = false;
-function reddyRecord(route, reset = false) {
-    if (reddyRestoring) return;
-    const state = history.state;
-    if (reset || !state || !state.reddy) {
-        history.replaceState({reddy:true, route, depth:0}, "");
-    } else if (JSON.stringify(state.route) !== JSON.stringify(route)) {
-        history.pushState({reddy:true, route, depth:state.depth+1}, "");
+let reddyRoutes = [];
+let reddyAuth = null;
+let reddyExitAt = 0;
+let reddyOverlays = [];
+let reddyBusy = false;
+const reddyNavigate = navigateTo;
+const reddyOpenChat = openChat;
+const reddySettings = openSettingsPage;
+const reddyChatList = openChatList;
+const reddyCloseChat = closeChat;
+function reddyLoggedIn() { return Boolean(localStorage.getItem('chatAppUserId')); }
+function reddyGuard() {
+    history.replaceState({reddy:true, backBase:true}, '');
+    history.pushState({reddy:true, backGuard:true}, '');
+}
+function reddyRoot() { return {page:reddyLoggedIn() ? 'chatContainerMain' : 'page1'}; }
+function reddySyncSession() {
+    const auth = localStorage.getItem('chatAppUserId') || '';
+    if (auth !== reddyAuth) {
+        reddyAuth = auth;
+        reddyDismissOverlays();
+        reddyRoutes = [reddyRoot()];
+        reddyExitAt = 0;
     }
 }
-const reddyNavigate = navigateTo;
-navigateTo = function(pageId) {
-    reddyNavigate(pageId);
-    reddyRecord({page:pageId}, pageId === "chatContainerMain" || pageId === "page1");
-};
-const reddyOpenChat = openChat;
-openChat = function(room) { reddyOpenChat(room); reddyRecord({page:"chat", room:Number(room)}); };
-const reddySettings = openSettingsPage;
-openSettingsPage = function() { reddySettings(); reddyRecord({page:"settingsPage"}); };
-const reddyChatList = openChatList;
-openChatList = function() { reddyChatList(); reddyRecord({page:"chatContainerMain"}); };
-const reddyCloseChat = closeChat;
-closeChat = function(room) {
-    if (!reddyRestoring && history.state?.reddy && history.state.depth > 0) history.back();
-    else { reddyCloseChat(room); openChatList(); }
-};
-backFromSettings = function() {
-    if (history.state?.reddy && history.state.depth > 0) history.back();
-    else openChatList();
-};
-window.addEventListener("popstate", event => {
-    if (!event.state?.reddy) return;
-    const route = event.state.route;
-    if (!localStorage.getItem("chatAppUserId") && ["chat", "settingsPage", "chatContainerMain"].includes(route.page)) {
-        reddyRestoring = true; navigateTo("page1"); reddyRestoring = false;
-        reddyRecord({page:"page1"}, true); return;
-    }
-    reddyRestoring = true;
+function reddyRecord(route) {
+    if (reddyRestoring) return;
+    reddySyncSession();
+    const last = reddyRoutes[reddyRoutes.length-1];
+    if (JSON.stringify(last) !== JSON.stringify(route)) reddyRoutes.push(route);
+    reddyExitAt = 0;
+}
+function reddyDismissOverlays() {
+    while (reddyOverlays.length) reddyOverlays.pop().close();
+}
+function reddyVisible(route) {
+    const id = route.page === 'chat' ? 'chatRoom'+route.room : route.page;
+    return document.getElementById(id);
+}
+function reddyPaint(route, back = false) {
+    if (reddyLoggedIn() && !['chat','settingsPage','chatContainerMain'].includes(route.page)) route=reddyRoot();
+    if (!reddyLoggedIn() && ['chat','settingsPage','chatContainerMain'].includes(route.page)) route=reddyRoot();
+    reddyRestoring=true;
     try {
         if (currentRoom !== null) reddyCloseChat(currentRoom);
-        if (route.page === "chat") { reddyChatList(); reddyOpenChat(route.room); }
-        else if (route.page === "settingsPage") { reddyChatList(); reddySettings(); }
-        else if (route.page === "chatContainerMain") reddyChatList();
-        else reddyNavigate(route.page);
-    } finally { reddyRestoring = false; }
+        reddyNavigate(route.page === 'chat' || route.page === 'settingsPage' ? 'chatContainerMain' : route.page);
+        if (route.page === 'chat') { reddyChatList(); reddyOpenChat(route.room); }
+        else if (route.page === 'settingsPage') { reddyChatList(); reddySettings(); }
+        else if (route.page === 'chatContainerMain') reddyChatList();
+    } finally { reddyRestoring=false; }
+    const node=reddyVisible(route);
+    if (node?.animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        node.animate([{transform:back?'translateX(-12%)':'translateX(100%)',opacity:0.65},{transform:'translateX(0)',opacity:1}], {duration:220,easing:'ease-out'});
+    }
+}
+navigateTo = function(pageId) {
+    reddySyncSession();
+    if (reddyLoggedIn() && pageId !== 'chatContainerMain') {
+        reddyPaint(reddyRoutes[reddyRoutes.length-1] || reddyRoot()); return;
+    }
+    const earlier = reddyRoutes.findIndex(route => route.page === pageId);
+    if (!reddyLoggedIn() && earlier >= 0 && earlier < reddyRoutes.length-1) {
+        const previous=reddyRoutes[reddyRoutes.length-1];
+        reddyRoutes=reddyRoutes.slice(0,earlier+1);
+        reddySlideBack(previous); reddyPaint({page:pageId},true); return;
+    }
+    reddyNavigate(pageId);
+    reddyRecord({page:pageId});
+};
+openChat = function(room) { if(!reddyLoggedIn())return; reddyPaint({page:'chat',room:Number(room)}); reddyRecord({page:'chat',room:Number(room)}); };
+openSettingsPage = function() { if(!reddyLoggedIn())return; reddyPaint({page:'settingsPage'}); reddyRecord({page:'settingsPage'}); };
+openChatList = function() { if(!reddyLoggedIn())return; reddyPaint({page:'chatContainerMain'}); reddyRecord({page:'chatContainerMain'}); };
+function reddySlideBack(previous) {
+    const node=reddyVisible(previous);
+    if (!node?.cloneNode || !node.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const box=node.getBoundingClientRect();
+    if (!box.width || !box.height) return;
+    const copy=node.cloneNode(true);
+    copy.removeAttribute('id');
+    copy.querySelectorAll('[id]').forEach(n=>n.removeAttribute('id'));
+    copy.setAttribute('aria-hidden','true'); copy.inert=true;
+    copy.style.cssText += `;position:fixed;left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px;margin:0;z-index:99990;pointer-events:none;overflow:hidden;background:#fff;`;
+    document.body.appendChild(copy);
+    const animation=copy.animate([{transform:'translateX(0)'},{transform:'translateX(100%)'}],{duration:220,easing:'ease-out'});
+    animation.onfinish=()=>copy.remove(); animation.oncancel=()=>copy.remove();
+}
+function reddyBack() {
+    reddySyncSession();
+    if (reddyOverlays.length) { reddyOverlays.pop().close(); reddyExitAt=0; return; }
+    if (reddyRoutes.length>1) {
+        const previous=reddyRoutes.pop();
+        reddySlideBack(previous); reddyPaint(reddyRoutes[reddyRoutes.length-1],true);
+        reddyExitAt=0; return;
+    }
+    reddyPaint(reddyRoot());
+    if (!reddyLoggedIn()) { window.close(); return; }
+    const now=Date.now();
+    if (reddyExitAt && now-reddyExitAt<2000) {
+        reddyExitAt=0;
+        // Supported app windows close here. Ordinary browser tabs may reject this.
+        window.close();
+        return;
+    }
+    reddyExitAt=now;
+    showCustomToast('বের হতে আবার Back চাপুন');
+}
+closeChat = function() { reddyBack(); };
+backFromSettings = function() { reddyBack(); };
+window.addEventListener('popstate', () => {
+    if (reddyBusy) return;
+    reddyBusy=true;
+    try { reddyBack(); } finally {
+        // Re-arm immediately: stale Login entries must never become reachable.
+        history.pushState({reddy:true,backGuard:true},''); reddyBusy=false;
+    }
 });
+function reddyOverlay(key, close) {
+    reddyOverlays=reddyOverlays.filter(item=>item.key!==key);
+    reddyOverlays.push({key,close}); reddyExitAt=0;
+}
+function reddyForgetOverlay(key) { reddyOverlays=reddyOverlays.filter(item=>item.key!==key); }
+const reddyMemberOpen=openMemberPopup, reddyMemberClose=closeMemberPopup;
+openMemberPopup=function(room){reddyMemberOpen(room);reddyOverlay('members',reddyMemberClose);};
+closeMemberPopup=function(){reddyMemberClose();reddyForgetOverlay('members');};
+const reddyMessageOpen=openMsgActionPopup, reddyMessageClose=closeMsgActionPopupDirect;
+openMsgActionPopup=function(...args){reddyMessageOpen(...args);reddyOverlay('message',reddyMessageClose);};
+closeMsgActionPopupDirect=function(){reddyMessageClose();reddyForgetOverlay('message');};
+const reddyFullscreen=openFullscreen;
+openFullscreen=function(url){
+    reddyFullscreen(url);
+    const overlay=document.body.lastElementChild;
+    reddyOverlay('photo',()=>overlay.remove());
+    overlay.addEventListener('click',()=>reddyForgetOverlay('photo'));
+};
+reddySyncSession();
+reddyGuard();
+window.addEventListener('pageshow', event => {
+    if (!event.persisted) return;
+    reddySyncSession();
+    reddyRoutes=[reddyRoot()];
+    reddyDismissOverlays();
+    reddyPaint(reddyRoot());
+});
+
 const reddyOriginalLoad = window.onload;
 window.onload = async function(event) {
     const wait = new Promise(resolve => setTimeout(resolve, 2500));
@@ -4079,7 +4178,8 @@ window.onload = async function(event) {
     document.getElementById("reddyUpdateSize").textContent = String(config.size || "");
     const modal = document.getElementById("reddyUpdate");
     modal.style.display = "flex";
-    document.getElementById("reddyLater").onclick = () => modal.style.display = "none";
+    reddyOverlay("update", () => modal.style.display = "none");
+    document.getElementById("reddyLater").onclick = () => { modal.style.display = "none"; reddyForgetOverlay("update"); };
     document.getElementById("reddyDownload").onclick = () => { window.location.href = url.href; };
 };
 </script>
