@@ -4067,8 +4067,8 @@ function reddyPaint(route, back = false) {
         else if (route.page === 'chatContainerMain') reddyChatList();
     } finally { reddyRestoring=false; }
     const node=reddyVisible(route);
-    if (node?.animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        node.animate([{transform:back?'translateX(-12%)':'translateX(100%)',opacity:0.65},{transform:'translateX(0)',opacity:1}], {duration:220,easing:'ease-out'});
+    if (back && node?.animate && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        node.animate([{transform:'translateX(-12%)',opacity:0.8},{transform:'translateX(0)',opacity:1}], {duration:480,easing:'cubic-bezier(0.22, 1, 0.36, 1)'});
     }
 }
 navigateTo = function(pageId) {
@@ -4099,7 +4099,7 @@ function reddySlideBack(previous) {
     copy.setAttribute('aria-hidden','true'); copy.inert=true;
     copy.style.cssText += `;position:fixed;left:${box.left}px;top:${box.top}px;width:${box.width}px;height:${box.height}px;margin:0;z-index:99990;pointer-events:none;overflow:hidden;background:#fff;`;
     document.body.appendChild(copy);
-    const animation=copy.animate([{transform:'translateX(0)'},{transform:'translateX(100%)'}],{duration:220,easing:'ease-out'});
+    const animation=copy.animate([{transform:'translateX(0)'},{transform:'translateX(100%)'}],{duration:480,easing:'cubic-bezier(0.22, 1, 0.36, 1)'});
     animation.onfinish=()=>copy.remove(); animation.oncancel=()=>copy.remove();
 }
 function reddyBack() {
@@ -4160,6 +4160,18 @@ window.addEventListener('pageshow', event => {
     reddyPaint(reddyRoot());
 });
 
+function reddyWelcomeRise() {
+    if (reddyLoggedIn() || reddyRoutes[reddyRoutes.length-1]?.page !== 'page1') return;
+    const content=document.getElementById('page1')?.firstElementChild;
+    if (!content?.animate || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    // Preserve the existing layout transform and every child element's final position.
+    const resting=window.getComputedStyle(content).transform;
+    const base=resting === 'none' ? '' : resting;
+    content.animate([
+        {transform:'translateY(32px) '+base, opacity:0.15},
+        {transform:base || 'none', opacity:1}
+    ], {duration:760,easing:'cubic-bezier(0.22, 1, 0.36, 1)',fill:'backwards'});
+}
 const reddyOriginalLoad = window.onload;
 window.onload = async function(event) {
     const wait = new Promise(resolve => setTimeout(resolve, 2500));
@@ -4169,6 +4181,7 @@ window.onload = async function(event) {
     if (reddyOriginalLoad) reddyOriginalLoad.call(window, event);
     await wait;
     document.getElementById("reddySplash").style.display = "none";
+    reddyWelcomeRise();
     const config = await Promise.race([check, new Promise(resolve => setTimeout(()=>resolve(null),2500))]);
     if (!config || !Number.isInteger(config.build) || config.build <= REDDY_APP_BUILD) return;
     let url;
