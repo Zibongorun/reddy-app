@@ -2058,6 +2058,7 @@ function validateStepTwo() {
             if (error) error.innerText = "";
             localStorage.setItem("cached_profile_" + userId, JSON.stringify(userData));
             enterHomePage(userId);
+            void reddyRecordSuccessfulLogin(userId);
         } else {
             if (error) error.innerText = "Incorrect password!";
         }
@@ -4311,5 +4312,101 @@ function reddyOpenChatPicker(searchMode) {
     reddyOverlay('chat-picker',reddyCloseChatPicker);
     panel.querySelector(searchMode?'input':'h2').focus();
 }
-</script></body>
+</script><script>
+/* Private, device-local login notices. No coordinates stored or shared in group messages. */
+function reddyLoginNotices(userId) {
+    try { const value=JSON.parse(localStorage.getItem('reddy_login_notices_'+userId)||'[]'); return Array.isArray(value)?value:[]; } catch (_) { return []; }
+}
+function reddySaveLoginNotice(userId, notice) {
+    const notices=reddyLoginNotices(userId);
+    const existing=notices.findIndex(item=>item.id===notice.id);
+    if(existing>=0) notices[existing]=notice; else notices.push(notice);
+    try {localStorage.setItem('reddy_login_notices_'+userId,JSON.stringify(notices.slice(-100)));} catch (_) {}
+    reddyPaintLoginNotices();
+}
+async function reddyDeviceDetails() {
+    const result={};
+    try {
+        if(navigator.userAgentData?.getHighEntropyValues) {
+            const hints=await navigator.userAgentData.getHighEntropyValues(['model','platformVersion']);
+            if(hints.model && hints.model!=='K') result.model=hints.model;
+            if(hints.platform) result.system=hints.platform+(hints.platformVersion?' '+hints.platformVersion:'');
+        }
+    } catch (_) {}
+    if(!result.system) {
+        const ua=navigator.userAgent||'';
+        // Reduced Android UA reports a frozen version: don't present it as the actual version.
+        if(/Android/.test(ua)) result.system='Android';
+        else if(/iPhone|iPad/.test(ua)) {const v=ua.match(/OS ([\d_]+)/); result.system='iOS'+(v?' '+v[1].replace(/_/g,'.'):''); result.model=/iPad/.test(ua)?'iPad':'iPhone';}
+        else if(/Windows/.test(ua)) result.system='Windows';
+        else if(/Macintosh/.test(ua)) result.system='macOS';
+        else if(/Linux/.test(ua)) result.system='Linux';
+    }
+    return result;
+}
+async function reddyLoginLocation() {
+    if(!navigator.geolocation || !window.isSecureContext) return '';
+    let position;
+    try {position=await new Promise((resolve,reject)=>navigator.geolocation.getCurrentPosition(resolve,reject,{enableHighAccuracy:true,timeout:12000,maximumAge:0}));} catch (_) {return '';}
+    // Very broad fixes cannot identify a neighborhood reliably.
+    if(!Number.isFinite(position.coords.accuracy)||position.coords.accuracy>2000) return '';
+    const controller=new AbortController(); const timer=setTimeout(()=>controller.abort(),8000);
+    try {
+        const url=new URL('https://api.bigdatacloud.net/data/reverse-geocode-client');
+        url.searchParams.set('latitude',position.coords.latitude); url.searchParams.set('longitude',position.coords.longitude);url.searchParams.set('localityLanguage','en');
+        const response=await fetch(url,{signal:controller.signal,credentials:'omit',referrerPolicy:'no-referrer'});
+        if(!response.ok) return '';
+        const data=await response.json();
+        // Provider-locality names are approximate, never an invented street/address.
+        return [...new Set([data.locality,data.city,data.principalSubdivision,data.countryName].filter(v=>typeof v==='string' && v.trim()))].join(', ');
+    } catch (_) {return '';} finally {clearTimeout(timer);}
+}
+function reddyLoginNoticeText(notice) {
+    const lines=['Your account has been logged in.'];
+    if(notice.model) lines.push('Device: '+notice.model);
+    if(notice.system) lines.push('System: '+notice.system);
+    if(notice.location) lines.push('Approximate location: '+notice.location);
+    lines.push('Date & time: '+new Date(notice.time).toLocaleString(undefined,{timeZoneName:'short'}));
+    return lines.join('\n');
+}
+async function reddyRecordSuccessfulLogin(userId) {
+    userId=String(userId);
+    const notice={id:globalThis.crypto?.randomUUID?.() || Date.now()+'_'+Math.random().toString(36).slice(2),time:Date.now()};
+    reddySaveLoginNotice(userId,notice);
+    const [device,location]=await Promise.all([reddyDeviceDetails(),reddyLoginLocation()]);
+    Object.assign(notice,device); if(location) notice.location=location;
+    reddySaveLoginNotice(userId,notice);
+}
+function reddyPaintLoginNotices() {
+    const userId=localStorage.getItem('chatAppUserId');
+    const area=document.getElementById('messagesArea7');
+    if(!area) return;
+    const notices=userId?reddyLoginNotices(userId):[];
+    const preview=document.getElementById('listMsg7');
+    if(notices.length && preview && preview.textContent!=='Your account has been logged in.') preview.textContent='Your account has been logged in.';
+    const signature=JSON.stringify([userId,notices]);
+    const old=area.querySelector('[data-reddy-login-notices]');
+    if(!notices.length) {old?.remove();return;}
+    if(old?.dataset.signature===signature) return;
+    old?.remove();
+    [...area.children].forEach(node=>{if(node.textContent.includes('No messages yet.')) node.remove();});
+    const box=document.createElement('div');box.dataset.reddyLoginNotices='true';box.dataset.signature=signature;
+    notices.forEach(notice=>{
+        const bubble=document.createElement('div');bubble.className='message';bubble.style.cssText='white-space:pre-wrap;margin:12px 0;overflow-wrap:anywhere;';
+        const name=document.createElement('strong');name.textContent='Service User';name.style.display='block';bubble.appendChild(name);
+        const text=document.createElement('div');text.textContent=reddyLoginNoticeText(notice);bubble.appendChild(text);box.appendChild(bubble);
+    });
+    area.appendChild(box);
+    if(currentRoom===7) area.scrollTop=area.scrollHeight;
+}
+(function reddyObserveServiceNotices(){
+    const area=document.getElementById('messagesArea7');
+    if(area) new MutationObserver(reddyPaintLoginNotices).observe(area,{childList:true});
+    const preview=document.getElementById('listMsg7');
+    if(preview) new MutationObserver(reddyPaintLoginNotices).observe(preview,{childList:true,subtree:true,characterData:true});
+    reddyPaintLoginNotices();
+})();
+
+</script>
+</body>
 </html>
