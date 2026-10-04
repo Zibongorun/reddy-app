@@ -1652,6 +1652,11 @@ async function createRoomSubgroup(roomNumber, subgroupId, subgroupName, members)
 // ----------------------------------------------------
 // CHECK USER'S SUBGROUP IN A ROOM
 // ----------------------------------------------------
+function selectUserSubgroup(groups, userId) {
+ const own='user_'+String(userId);
+ if(groups[own]?.members?.[String(userId)]===true) return own;
+ return Object.keys(groups).find(id=>groups[id]?.members?.[String(userId)]===true)||null;
+}
 async function getUserRoomSubgroup(roomNumber, userId) {
 
     try {
@@ -1671,6 +1676,9 @@ async function getUserRoomSubgroup(roomNumber, userId) {
         }
 
         const subgroups = snapshot.val();
+        const ownId='user_'+String(userId);
+        if(subgroups[ownId]?.members?.[String(userId)]===true){const g=subgroups[ownId];return {id:ownId,name:g.name||'',members:g.members||{}};}
+
 
         for (const subgroupId in subgroups) {
 
@@ -2213,22 +2221,8 @@ function loadRoomMembers(roomNumber) {
         // CURRENT USER-এর SUBGROUP খুঁজে বের করা
         // ==========================================
 
-        let currentSubgroup = null;
-        let currentSubgroupId = null;
-
-        Object.keys(subgroups).forEach(subgroupId => {
-
-            const subgroup = subgroups[subgroupId];
-
-            if (
-                subgroup &&
-                subgroup.members &&
-                subgroup.members[String(userId)] === true
-            ) {
-                currentSubgroup = subgroup;
-                currentSubgroupId = String(subgroupId);
-            }
-        });
+        const currentSubgroupId = selectUserSubgroup(subgroups,userId);
+        const currentSubgroup = currentSubgroupId ? subgroups[currentSubgroupId] : null;
 
         // ==========================================
         // USER কোনো subgroup-এ নেই
@@ -2462,6 +2456,7 @@ async function sendMessage(roomNumber) {
 
     // Subgroup থাকলে ID যাবে
     // না থাকলে null যাবে
+    if(!subgroup?.id){showCustomToast('Chat is not ready yet.');return;}
     const subgroupId = subgroup
         ? String(subgroup.id)
         : null;
@@ -2531,6 +2526,7 @@ async function sendMediaMessageToRoom(
     const subgroup = await getCurrentUserSubgroup(roomNumber);
 
     // Subgroup না থাকলে null
+    if(!subgroup?.id){showCustomToast('Chat is not ready yet.');return;}
     const subgroupId = subgroup
         ? String(subgroup.id)
         : null;
@@ -3110,20 +3106,8 @@ function loadPopupMembersData(roomNumber) {
 
         const subgroups = snapshot.val() || {};
 
-        let currentSubgroup = null;
-
-        // Find current user's subgroup
-        Object.keys(subgroups).forEach(subgroupId => {
-            const subgroup = subgroups[subgroupId];
-
-            if (
-                subgroup &&
-                subgroup.members &&
-                subgroup.members[String(userId)] === true
-            ) {
-                currentSubgroup = subgroup;
-            }
-        });
+        const selectedId = selectUserSubgroup(subgroups,userId);
+        const currentSubgroup = selectedId ? subgroups[selectedId] : null;
 
         // User is not assigned to any subgroup
         if (!currentSubgroup) {
@@ -3526,25 +3510,7 @@ function preFetchAllRoomsData() {
                 ==================================
                 */
 
-                let currentSubgroupId = null;
-
-                Object.keys(groups).forEach(groupId => {
-
-                    const group =
-                        groups[groupId];
-
-                    if (
-                        group &&
-                        group.members &&
-                        group.members[
-                            String(userId)
-                        ] === true
-                    ) {
-
-                        currentSubgroupId =
-                            String(groupId);
-                    }
-                });
+                const currentSubgroupId = selectUserSubgroup(groups,userId);
 
 
                 /*
