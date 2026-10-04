@@ -2356,7 +2356,7 @@ function loadRoomMessages(roomNumber) {
         const subgroup = await getCurrentUserSubgroup(roomNumber);
 
 if (!subgroup || !subgroup.id) {
-    showCustomToast("You are not assigned to this chat group.");
+    // No subgroup assigned: keep the room empty silently.
     return;
 }
 
@@ -4384,6 +4384,16 @@ function reddyPaintLoginNotices() {
     const notices=userId?reddyLoginNotices(userId):[];
     const preview=document.getElementById('listMsg7');
     if(notices.length && preview && preview.textContent!=='Your account has been logged in.') preview.textContent='Your account has been logged in.';
+    const timeLabel=document.getElementById('roomTime7');
+    const latest=notices.reduce((best,n)=>Number(n.time)>Number(best?.time||0)?n:best,null);
+    if(timeLabel && latest) {
+        const when=new Date(latest.time);
+        const today=new Date();
+        const label=when.toDateString()===today.toDateString()
+          ? when.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit'})
+          : when.toLocaleDateString(undefined,{day:'numeric',month:'short'});
+        if(timeLabel.textContent!==label) timeLabel.textContent=label;
+    }
     const signature=JSON.stringify([userId,notices]);
     const old=area.querySelector('[data-reddy-login-notices]');
     if(!notices.length) {old?.remove();return;}
@@ -4404,6 +4414,9 @@ function reddyPaintLoginNotices() {
     if(area) new MutationObserver(reddyPaintLoginNotices).observe(area,{childList:true});
     const preview=document.getElementById('listMsg7');
     if(preview) new MutationObserver(reddyPaintLoginNotices).observe(preview,{childList:true,subtree:true,characterData:true});
+    const timeLabel=document.getElementById('roomTime7');
+    if(timeLabel) new MutationObserver(reddyPaintLoginNotices).observe(timeLabel,{childList:true,subtree:true,characterData:true});
+    setInterval(reddyPaintLoginNotices,60000);
     reddyPaintLoginNotices();
 })();
 
